@@ -1,0 +1,11 @@
+# Personal Assistant settings (defaults). The installer copies this to the app
+# folder; the dashboard edits that copy. Changes apply on the next request.
+wake_word_enabled: true
+wake_word: jarvis
+hotkey: <ctrl>+<shift>+<space>
+speak_aloud: true
+show_notifications: true
+screen_access: true
+drawing: true
+stt_model: base.en
+silence_timeout_ms: 900
