@@ -1,9 +1,17 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
+*.egg-info/
 .pytest_cache/
-*.mp4
-*.png
-!docs/*.png
-dist/
+.mypy_cache/
+.ruff_cache/
+
+# Build output
 build/
+dist/
+
+# Private design references (not published)
+*.mp4
+UI design for Notification.png
+UI for setup.png

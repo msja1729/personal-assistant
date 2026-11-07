@@ -1,8 +1,8 @@
-"""Settings (config.yaml) and the app's on-disk locations.
+"""Settings (config.yaml) and the app's folder on disk.
 
-Every feature toggle lives in ``config.yaml`` inside the app home folder. The
-dashboard edits this file; the app and the senses MCP server re-read it, so a
-change applies on the next request without a restart.
+Every feature switch lives in ``config.yaml`` inside the app folder. Readers
+always get a complete, valid ``Config``: a missing file, broken YAML or a
+wrong value falls back to the default instead of crashing.
 """
 
 from __future__ import annotations
@@ -14,11 +14,15 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from src import APP_ID
 
 
 @dataclass
 class Config:
+    """All settings from SPEC.md with their defaults."""
+
     wake_word_enabled: bool = True
     wake_word: str = "jarvis"
     hotkey: str = "<ctrl>+<shift>+<space>"
@@ -30,104 +34,67 @@ class Config:
     silence_timeout_ms: int = 900
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> "Config":
-        """Build a Config from raw YAML data, keeping defaults for missing or invalid values."""
+    def from_dict(cls, data: object) -> Config:
+        """Build a Config from raw YAML data, keeping the default for anything missing or invalid."""
         cfg = cls()
         if not isinstance(data, dict):
             return cfg
         for f in fields(cls):
-            if f.name not in data:
-                continue
-            value = data[f.name]
-            default = getattr(cfg, f.name)
-            try:
-                if isinstance(default, bool):
-                    value = _to_bool(value)
-                elif isinstance(default, int):
-                    value = int(value)
-                    if value <= 0:
-                        raise ValueError
-                else:
-                    value = str(value).strip()
-                    if not value:
-                        raise ValueError
-            except (TypeError, ValueError):
-                continue  # keep the default for an unusable value
-            setattr(cfg, f.name, value)
+            if f.name in data:
+                try:
+                    setattr(cfg, f.name, _coerce(data[f.name], getattr(cfg, f.name)))
+                except ValueError:
+                    pass  # keep the default
         return cfg
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def _to_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str) and value.strip().lower() in {"true", "yes", "on", "1"}:
-        return True
-    if isinstance(value, str) and value.strip().lower() in {"false", "no", "off", "0"}:
-        return False
-    if isinstance(value, int):
-        return bool(value)
-    raise ValueError(f"not a boolean: {value!r}")
+def _coerce(value: object, default: object) -> object:
+    """Convert ``value`` to the type of ``default`` or raise ValueError."""
+    if isinstance(default, bool):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in ("true", "yes", "on"):
+            return True
+        if isinstance(value, str) and value.strip().lower() in ("false", "no", "off"):
+            return False
+        raise ValueError(f"not a yes/no value: {value!r}")
+    if isinstance(default, int):
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise ValueError(f"not a whole number: {value!r}")
+        number = int(value)
+        if number <= 0:
+            raise ValueError(f"must be positive: {value!r}")
+        return number
+    if isinstance(value, (str, int, float)) and str(value).strip():
+        return str(value).strip()
+    raise ValueError(f"not usable text: {value!r}")
 
 
 # ---------------------------------------------------------------- locations
 
 
 def app_home() -> Path:
-    """Folder holding config, logs, models, the venv and the install manifest.
+    """Folder for config, logs, models and everything else the app stores.
 
-    ``PA_HOME`` overrides it (used by tests and portable runs).
+    ``PA_HOME`` overrides it (used by tests).
     """
     override = os.environ.get("PA_HOME")
     if override:
         return Path(override)
     if sys.platform == "win32":
-        # Not under AppData: Microsoft Store Python silently redirects writes there
-        # into a private folder that Claude Code (and other programs) cannot see.
+        # Not under AppData: Microsoft Store Python silently redirects writes
+        # there into a private folder other programs (Claude Code) cannot see.
         return Path.home() / ".personal-assistant"
     if sys.platform == "darwin":
-        base = Path.home() / "Library" / "Application Support"
-    else:
-        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
-    return base / APP_ID
-
-
-def keep_caches_in_app_home() -> None:
-    """Point library caches into the app folder so uninstall leaves nothing behind."""
-    os.environ.setdefault("MPLCONFIGDIR", str(app_home() / "cache" / "matplotlib"))
-    os.environ.setdefault("HF_HOME", str(app_home() / "cache" / "huggingface"))
-    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+        return Path.home() / "Library" / "Application Support" / APP_ID
+    return Path.home() / ".local" / "share" / APP_ID
 
 
 def config_path() -> Path:
     return app_home() / "config.yaml"
-
-
-def logs_dir() -> Path:
-    return app_home() / "logs"
-
-
-def models_dir() -> Path:
-    return app_home() / "models"
-
-
-def workspace_dir() -> Path:
-    """Working folder for Claude Code sessions, so they never touch the user's projects."""
-    return app_home() / "workspace"
-
-
-def state_path() -> Path:
-    return app_home() / "state.json"
-
-
-def manifest_path() -> Path:
-    return app_home() / "install_manifest.json"
-
-
-def ipc_key_path() -> Path:
-    return app_home() / "ipc.key"
 
 
 # ---------------------------------------------------------------- load / save
@@ -135,8 +102,6 @@ def ipc_key_path() -> Path:
 
 def load(path: Path | None = None) -> Config:
     """Read config.yaml. A missing or broken file gives the defaults."""
-    import yaml
-
     path = path or config_path()
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -147,8 +112,6 @@ def load(path: Path | None = None) -> Config:
 
 def save(cfg: Config, path: Path | None = None) -> None:
     """Write config.yaml atomically, so a reader never sees a half-written file."""
-    import yaml
-
     path = path or config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     text = "# Personal Assistant settings. The dashboard edits this file.\n" + yaml.safe_dump(
@@ -165,7 +128,7 @@ def save(cfg: Config, path: Path | None = None) -> None:
 
 
 def ensure_default(path: Path | None = None) -> Config:
-    """Create config.yaml with defaults if it does not exist; return the current config."""
+    """Create config.yaml with the defaults if it does not exist; return the current settings."""
     path = path or config_path()
     if not path.exists():
         save(Config(), path)

@@ -7,16 +7,16 @@ A background desktop app for Windows and macOS that lets the user talk to Claude
 1. Trigger: the wake word "Jarvis" or a global hotkey starts listening.
 2. Voice in: user speech is converted to text and sent to Claude Code.
 3. Reply out: Claude's reply is shown as a notification and spoken aloud.
-4. Senses: a local MCP server, registered into Claude Code at install, exposes screen capture (single screenshot).
+4. Senses: a local MCP server, registered into Claude Code by the first-run setup screen, exposes screen capture (single screenshot).
 5. Pen: Claude can open a translucent "glass blackboard" or draw directly over the current screen to explain (text, LaTeX math, arrows, shapes, highlights).
 6. Dashboard: settings to toggle every feature on/off at runtime.
-7. Guided connectors: the installer walks the user through adding existing mail, Teams, calendar, and health connectors to Claude Code. Health covers all major sources — Apple Health, Google Health (Health Connect / Google Fit), and others (e.g. Samsung Health, Fitbit, Garmin) — for users on both Android and Apple (iPhone/Mac) devices.
-8. Uninstall: removing the app cleans up everything it added — app files, `config.yaml`, logs, models, and every entry it added to Claude Code's settings (the senses MCP server and any connectors the installer added). Anything the user had set up in Claude Code before installing is left untouched.
+7. Install and setup: the app is downloaded from GitHub Releases as a normal installer (Windows `Setup.exe`, macOS `.dmg`) with Python bundled. On first launch a setup screen checks Claude Code, adds the senses, requests macOS permissions and guides connectors; when setup is done, the dashboard opens. Guided connectors: the setup screen walks the user through adding existing mail, Teams, calendar, and health connectors to Claude Code. Health covers all major sources — Apple Health, Google Health (Health Connect / Google Fit), and others (e.g. Samsung Health, Fitbit, Garmin) — for users on both Android and Apple (iPhone/Mac) devices.
+8. Uninstall: an "Uninstall" button in the dashboard (and, on Windows, *Settings → Apps*) cleans up everything the app added — app files, `config.yaml`, logs, models, and every entry it added to Claude Code's settings (the senses MCP server and any connectors added during setup). Anything the user had set up in Claude Code before installing is left untouched.
 
 ## Out of Scope (v1)
 - Continuous screen capture / screen video
 - Reminders and scheduling
-- Writing our own mail/Teams/calendar integrations (the installer only guides setup of existing connectors)
+- Writing our own mail/Teams/calendar integrations (the setup screen only guides setup of existing connectors)
 - Linux, mobile, multi-user, cloud sync
 
 ## Constraints
@@ -31,7 +31,8 @@ A background desktop app for Windows and macOS that lets the user talk to Claude
 - Senses and pen are exposed only as MCP tools from our own MCP server (stdio).
 - Every feature is controlled from `config.yaml`; the dashboard edits this file.
 - Permissions are enforced in code by the MCP server and app, never left to the model.
-- On macOS, the installer requests Microphone, Screen Recording, and Accessibility permissions and reports any that are denied.
+- On macOS, the setup screen requests Microphone, Screen Recording, and Accessibility permissions and shows any that are denied.
+- Distribution: installers are built by GitHub Actions with PyInstaller (Windows `Setup.exe`, macOS `.dmg`) and published on GitHub Releases. Users need Claude Code, not Python.
 
 ## Components
 
@@ -45,8 +46,9 @@ A background desktop app for Windows and macOS that lets the user talk to Claude
 | Overlay | Render pen tool commands with a handwriting-style animation |
 | Dashboard | Show status; toggle features; changes apply without restart |
 | Platform | All Windows/macOS-specific calls (hotkey, TTS, notifications, permissions, DPI) |
-| Installer | Register MCP server; request OS permissions; guide connector setup; write default config; record everything it added in an install manifest |
-| Uninstaller | Read the install manifest; remove every Claude Code entry the installer added (senses MCP server, connectors); delete app files, config, logs, and models; on macOS, reset the app's Microphone, Screen Recording, and Accessibility permissions |
+| Setup Screen | First-run window: check Claude Code; register MCP server; request OS permissions; guide connector setup; write default config; record everything it added in a manifest; then open the dashboard |
+| Uninstall | Dashboard button (and Windows uninstaller hook): read the manifest; remove every Claude Code entry setup added (senses MCP server, connectors); delete app files, config, logs, and models; on macOS, reset the app's Microphone, Screen Recording, and Accessibility permissions |
+| Packaging | GitHub Actions builds the Windows installer and macOS `.dmg` and attaches them to a GitHub Release |
 
 ## Inputs and Outputs
 
@@ -71,12 +73,12 @@ A background desktop app for Windows and macOS that lets the user talk to Claude
 - All coordinates `x, y, w, h` are normalized floats in `[0, 1]` relative to the target monitor.
 - A tool whose feature is disabled returns `{ok: false, error: "<feature> disabled by user"}` and performs no action.
 
-**Installer connector step**
+**Setup screen connector step**
 - In: user selects zero or more of: Microsoft 365 (mail, Teams, calendar), Gmail, Google Calendar, Health (Apple Health, Google Health Connect / Google Fit, others).
-- Out: each selected connector is added to Claude Code at user scope; the user can skip any or all. Each one added is written to the install manifest.
+- Out: each selected connector is added to Claude Code at user scope; the user can skip any or all. Each one added is written to the manifest.
 
-**Uninstaller**
-- In: the install manifest (list of Claude Code entries and file paths the installer created).
+**Uninstall**
+- In: the manifest (list of Claude Code entries and file paths setup created).
 - Out: every listed entry and path is removed; entries not in the manifest are never touched. Running it twice is safe (already-removed items are skipped).
 
 **config.yaml keys**
@@ -84,10 +86,12 @@ A background desktop app for Windows and macOS that lets the user talk to Claude
 
 ## Acceptance Criteria
 All criteria are checked on both Windows 11 and macOS 14+.
-- After install, `claude mcp list` shows the senses server, and Claude Code can call `capture_screen`.
+- The Windows installer and macOS `.dmg` from GitHub Releases install and launch the app on a machine without Python.
+- On first launch the setup screen appears; after it finishes, the dashboard opens, and the setup screen does not appear again on later launches.
+- After setup, `claude mcp list` shows the senses server, and Claude Code can call `capture_screen`.
 - After the guided connector step, `claude mcp list` shows every connector the user selected and none they skipped.
-- After uninstall, `claude mcp list` no longer shows the senses server or any connector the installer added, while entries the user had before install are still present; no app files, config, logs, or models remain on disk.
-- On macOS, the installer prints the status (granted/denied) of Microphone, Screen Recording, and Accessibility.
+- After uninstall, `claude mcp list` no longer shows the senses server or any connector setup added, while entries the user had before install are still present; no app files, config, logs, or models remain on disk.
+- On macOS, the setup screen shows the status (granted/denied) of Microphone, Screen Recording, and Accessibility.
 - Pressing the hotkey starts recording within 300 ms (log timestamp).
 - Saying "Jarvis" starts recording in ≥ 9 of 10 trials in a quiet room.
 - Recording stops automatically after `silence_timeout_ms` of silence.
@@ -101,7 +105,7 @@ All criteria are checked on both Windows 11 and macOS 14+.
 - Toggling any setting in the dashboard takes effect on the next request without restarting the app.
 - `board_open("glass")` shows a translucent board; `board_open("screen")` shows a fully transparent overlay. In both modes mouse clicks pass through to apps beneath.
 - `board_write_latex(r"\frac{n(n+1)}{2}", 0.5, 0.5)` renders the fraction centred within ±2% of screen width/height of the given point, on a standard display and on a scaled display (Windows 150%, macOS Retina).
-- `pytest` passes on both OSes for: config load/save, toggle enforcement on every MCP tool, coordinate conversion (normalized → pixels with DPI scaling), Agent Bridge event parsing, installer connector selection, and uninstaller cleanup (removes only manifest entries; safe to run twice).
+- `pytest` passes on both OSes for: config load/save, toggle enforcement on every MCP tool, coordinate conversion (normalized → pixels with DPI scaling), Agent Bridge event parsing, setup connector selection, and uninstall cleanup (removes only manifest entries; safe to run twice).
 
 ## Output Files
 ```
@@ -116,13 +120,15 @@ src/overlay.py
 src/dashboard.py
 src/config.py
 src/platform_support.py
-install.py
-uninstall.py
+src/setup_screen.py
+src/uninstall.py
+packaging/                  (PyInstaller spec, Windows installer script, macOS dmg script)
+.github/workflows/          (CI tests; release builds)
 tests/test_config.py
 tests/test_toggles.py
 tests/test_coords.py
 tests/test_agent_bridge.py
-tests/test_installer.py
-tests/test_uninstaller.py
+tests/test_setup.py
+tests/test_uninstall.py
 README.md
 ```

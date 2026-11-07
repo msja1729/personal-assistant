@@ -1,5 +1,5 @@
-# Personal Assistant settings (defaults). The installer copies this to the app
-# folder; the dashboard edits that copy. Changes apply on the next request.
+# Personal Assistant default settings. On first launch these are copied to the
+# app folder; the dashboard edits that copy. Changes apply on the next request.
 wake_word_enabled: true
 wake_word: jarvis
 hotkey: <ctrl>+<shift>+<space>
